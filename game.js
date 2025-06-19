@@ -19,16 +19,10 @@ class RubiksCubeGame {
         document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
         document.getElementById('reset-btn').addEventListener('click', () => this.resetGame());
         document.getElementById('scramble-btn').addEventListener('click', () => this.scrambleCube());
-        document.getElementById('clockwise-btn').addEventListener('click', () => this.rotateFace(true));
-        document.getElementById('counterclockwise-btn').addEventListener('click', () => this.rotateFace(false));
         document.getElementById('save-score-btn').addEventListener('click', () => this.saveScore());
         document.getElementById('play-again-btn').addEventListener('click', () => this.playAgain());
         document.getElementById('back-to-menu-btn').addEventListener('click', () => this.backToMenu());
         document.getElementById('size-filter').addEventListener('change', () => this.filterScoreboard());
-
-        document.querySelectorAll('.face-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => this.selectFace(e.target.dataset.face));
-        });
     }
 
     showScreen(screenName) {
@@ -55,16 +49,17 @@ class RubiksCubeGame {
         const canvas = document.getElementById('game-canvas');
         this.cubeRenderer = new CubeRenderer(canvas, this.cubeSize);
         this.cubeState = new CubeState(this.cubeSize);
+        this.cubeRenderer.setFaceRotationCallback((face, clockwise) => {
+            if (this.isGameActive && !this.timer.isPaused) {
+                this.rotateFaceByName(face, clockwise);
+            }
+        });
         this.cubeRenderer.updateCube(this.cubeState.getState());
         this.selectFace('front');
     }
 
     selectFace(face) {
         this.selectedFace = face;
-        document.querySelectorAll('.face-btn').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-        document.querySelector(`[data-face="${face}"]`).classList.add('selected');
     }
 
     rotateFace(clockwise) {
@@ -72,6 +67,16 @@ class RubiksCubeGame {
         
         this.cubeState.rotateFace(this.selectedFace, clockwise);
         this.cubeRenderer.animateRotation(this.selectedFace, clockwise, () => {
+            this.cubeRenderer.updateCube(this.cubeState.getState());
+            this.checkWinCondition();
+        });
+    }
+
+    rotateFaceByName(face, clockwise) {
+        if (!this.isGameActive || this.timer.isPaused) return;
+        
+        this.cubeState.rotateFace(face, clockwise);
+        this.cubeRenderer.animateRotation(face, clockwise, () => {
             this.cubeRenderer.updateCube(this.cubeState.getState());
             this.checkWinCondition();
         });
@@ -171,19 +176,13 @@ class RubiksCubeGame {
 
     updateControls() {
         const pauseBtn = document.getElementById('pause-btn');
-        const faceButtons = document.querySelectorAll('.face-btn');
-        const rotationButtons = document.querySelectorAll('.rotation-controls .btn');
         const scrambleBtn = document.getElementById('scramble-btn');
         
         if (this.timer.isPaused) {
             pauseBtn.textContent = 'Resume';
-            faceButtons.forEach(btn => btn.disabled = true);
-            rotationButtons.forEach(btn => btn.disabled = true);
             scrambleBtn.disabled = true;
         } else {
             pauseBtn.textContent = 'Pause';
-            faceButtons.forEach(btn => btn.disabled = false);
-            rotationButtons.forEach(btn => btn.disabled = false);
             scrambleBtn.disabled = false;
         }
     }
@@ -459,10 +458,30 @@ class CubeRenderer {
     setupControls() {
         let isDragging = false;
         let previousMousePosition = { x: 0, y: 0 };
+        let dragStartPosition = { x: 0, y: 0 };
+        let clickedFace = null;
+        let isRotatingFace = false;
+        
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
 
         this.canvas.addEventListener('mousedown', (e) => {
             isDragging = true;
             previousMousePosition = { x: e.clientX, y: e.clientY };
+            dragStartPosition = { x: e.clientX, y: e.clientY };
+            
+            this.mouse.x = (e.offsetX / this.canvas.clientWidth) * 2 - 1;
+            this.mouse.y = -(e.offsetY / this.canvas.clientHeight) * 2 + 1;
+            
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            const intersects = this.raycaster.intersectObjects(this.cubeGroup.children);
+            
+            if (intersects.length > 0) {
+                clickedFace = this.getFaceFromIntersection(intersects[0]);
+                isRotatingFace = true;
+            } else {
+                isRotatingFace = false;
+            }
         });
 
         this.canvas.addEventListener('mousemove', (e) => {
@@ -473,14 +492,33 @@ class CubeRenderer {
                 y: e.clientY - previousMousePosition.y
             };
 
-            this.cubeGroup.rotation.y += deltaMove.x * 0.01;
-            this.cubeGroup.rotation.x += deltaMove.y * 0.01;
+            if (isRotatingFace && clickedFace) {
+                return;
+            } else {
+                this.cubeGroup.rotation.y += deltaMove.x * 0.01;
+                this.cubeGroup.rotation.x += deltaMove.y * 0.01;
+            }
 
             previousMousePosition = { x: e.clientX, y: e.clientY };
         });
 
-        this.canvas.addEventListener('mouseup', () => {
+        this.canvas.addEventListener('mouseup', (e) => {
+            if (isDragging && isRotatingFace && clickedFace) {
+                const dragDistance = {
+                    x: e.clientX - dragStartPosition.x,
+                    y: e.clientY - dragStartPosition.y
+                };
+                
+                const threshold = 20;
+                if (Math.abs(dragDistance.x) > threshold || Math.abs(dragDistance.y) > threshold) {
+                    const clockwise = this.getDragDirection(clickedFace, dragDistance);
+                    this.onFaceRotation(clickedFace, clockwise);
+                }
+            }
+            
             isDragging = false;
+            clickedFace = null;
+            isRotatingFace = false;
         });
 
         this.canvas.addEventListener('wheel', (e) => {
@@ -488,6 +526,66 @@ class CubeRenderer {
             const scale = e.deltaY > 0 ? 1.1 : 0.9;
             this.camera.position.multiplyScalar(scale);
         });
+    }
+
+    getFaceFromIntersection(intersection) {
+        const point = intersection.point;
+        const object = intersection.object;
+        const face = intersection.face;
+        
+        const size = this.size;
+        const cubeSize = 0.95;
+        const gap = 0.05;
+        const totalSize = size * (cubeSize + gap) - gap;
+        const offset = totalSize / 2 - cubeSize / 2;
+        
+        const localPoint = point.clone().sub(object.position);
+        const normal = face.normal.clone();
+        
+        if (Math.abs(normal.x) > 0.9) {
+            return normal.x > 0 ? 'right' : 'left';
+        } else if (Math.abs(normal.y) > 0.9) {
+            return normal.y > 0 ? 'top' : 'bottom';
+        } else if (Math.abs(normal.z) > 0.9) {
+            return normal.z > 0 ? 'front' : 'back';
+        }
+        
+        return null;
+    }
+
+    getDragDirection(face, dragDistance) {
+        const absX = Math.abs(dragDistance.x);
+        const absY = Math.abs(dragDistance.y);
+        
+        switch (face) {
+            case 'front':
+            case 'back':
+                if (absX > absY) {
+                    return face === 'front' ? dragDistance.x > 0 : dragDistance.x < 0;
+                } else {
+                    return face === 'front' ? dragDistance.y < 0 : dragDistance.y > 0;
+                }
+            case 'left':
+            case 'right':
+                if (absY > absX) {
+                    return face === 'right' ? dragDistance.y < 0 : dragDistance.y > 0;
+                } else {
+                    return face === 'right' ? dragDistance.x < 0 : dragDistance.x > 0;
+                }
+            case 'top':
+            case 'bottom':
+                if (absX > absY) {
+                    return face === 'top' ? dragDistance.x > 0 : dragDistance.x < 0;
+                } else {
+                    return face === 'top' ? dragDistance.y > 0 : dragDistance.y < 0;
+                }
+            default:
+                return true;
+        }
+    }
+
+    setFaceRotationCallback(callback) {
+        this.onFaceRotation = callback;
     }
 
     createCube() {

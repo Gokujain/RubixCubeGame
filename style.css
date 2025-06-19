@@ -178,43 +178,22 @@ body {
     text-align: center;
 }
 
-.face-controls {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+.mouse-instructions {
+    background: #f7fafc;
+    border-radius: 8px;
+    padding: 15px;
     margin-bottom: 20px;
+    border-left: 4px solid #4299e1;
 }
 
-.face-btn {
-    padding: 10px;
-    background: #e2e8f0;
-    border: 2px solid transparent;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 500;
-}
-
-.face-btn:hover {
-    background: #cbd5e0;
-}
-
-.face-btn.selected {
-    background: #4299e1;
-    color: white;
-    border-color: #3182ce;
-}
-
-.rotation-controls {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-}
-
-.rotation-controls .btn {
-    flex: 1;
-    padding: 10px;
+.mouse-instructions p {
+    margin: 8px 0;
     font-size: 0.9em;
+    color: #4a5568;
+}
+
+.mouse-instructions strong {
+    color: #2d3748;
 }
 
 #victory-screen {
