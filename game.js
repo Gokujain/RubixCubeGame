@@ -611,6 +611,603 @@ class Scoreboard {
     }
 }
 
+class TaskTracker {
+    constructor() {
+        this.tasks = this.loadTasks();
+        this.gamificationSystem = new GamificationSystem();
+        this.currentEditingTask = null;
+        this.activeTimers = new Map();
+        
+        this.initializeEventListeners();
+        this.updateDisplay();
+    }
+
+    initializeEventListeners() {
+        document.getElementById('show-task-tracker-btn').addEventListener('click', () => this.showTaskTracker());
+        document.getElementById('back-to-menu-from-tasks-btn').addEventListener('click', () => this.backToMenu());
+        document.getElementById('add-task-btn').addEventListener('click', () => this.showAddTaskModal());
+        document.getElementById('close-modal-btn').addEventListener('click', () => this.hideModal());
+        document.getElementById('cancel-task-btn').addEventListener('click', () => this.hideModal());
+        document.getElementById('task-form').addEventListener('submit', (e) => this.handleTaskSubmit(e));
+        document.getElementById('status-filter').addEventListener('change', () => this.updateTaskList());
+        document.getElementById('priority-filter').addEventListener('change', () => this.updateTaskList());
+
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) {
+                this.hideModal();
+            }
+        });
+    }
+
+    showTaskTracker() {
+        document.querySelectorAll('.screen').forEach(screen => {
+            screen.classList.remove('active');
+        });
+        document.getElementById('task-tracker-screen').classList.add('active');
+        this.updateDisplay();
+    }
+
+    backToMenu() {
+        document.querySelectorAll('.screen').forEach(screen => {
+            screen.classList.remove('active');
+        });
+        document.getElementById('welcome-screen').classList.add('active');
+    }
+
+    showAddTaskModal() {
+        this.currentEditingTask = null;
+        document.getElementById('modal-title').textContent = 'Add New Task';
+        document.getElementById('task-form').reset();
+        document.getElementById('task-modal').classList.add('active');
+    }
+
+    showEditTaskModal(taskId) {
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        this.currentEditingTask = taskId;
+        document.getElementById('modal-title').textContent = 'Edit Task';
+        document.getElementById('task-title').value = task.title;
+        document.getElementById('task-description').value = task.description;
+        document.getElementById('task-priority').value = task.priority;
+        document.getElementById('estimated-time').value = task.estimatedTime;
+        document.getElementById('task-modal').classList.add('active');
+    }
+
+    hideModal() {
+        document.getElementById('task-modal').classList.remove('active');
+        this.currentEditingTask = null;
+    }
+
+    handleTaskSubmit(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('task-title').value.trim();
+        const description = document.getElementById('task-description').value.trim();
+        const priority = document.getElementById('task-priority').value;
+        const estimatedTime = parseInt(document.getElementById('estimated-time').value);
+
+        if (!title) return;
+
+        if (this.currentEditingTask) {
+            this.updateTask(this.currentEditingTask, { title, description, priority, estimatedTime });
+        } else {
+            this.addTask(title, description, priority, estimatedTime);
+        }
+
+        this.hideModal();
+    }
+
+    addTask(title, description, priority, estimatedTime) {
+        const task = {
+            id: Date.now().toString(),
+            title,
+            description,
+            priority,
+            estimatedTime,
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+            completedAt: null,
+            timeSpent: 0,
+            isOverdue: false
+        };
+
+        this.tasks.push(task);
+        this.saveTasks();
+        this.updateDisplay();
+    }
+
+    updateTask(taskId, updates) {
+        const taskIndex = this.tasks.findIndex(t => t.id === taskId);
+        if (taskIndex === -1) return;
+
+        this.tasks[taskIndex] = { ...this.tasks[taskIndex], ...updates };
+        this.saveTasks();
+        this.updateDisplay();
+    }
+
+    deleteTask(taskId) {
+        if (!confirm('Are you sure you want to delete this task?')) return;
+        
+        this.stopTaskTimer(taskId);
+        this.tasks = this.tasks.filter(t => t.id !== taskId);
+        this.saveTasks();
+        this.updateDisplay();
+    }
+
+    startTask(taskId) {
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task || task.status === 'completed') return;
+
+        task.status = 'in-progress';
+        this.saveTasks();
+        
+        const timer = new TaskTimer(taskId, () => this.updateTaskTimer(taskId));
+        this.activeTimers.set(taskId, timer);
+        timer.start();
+        
+        this.updateDisplay();
+    }
+
+    pauseTask(taskId) {
+        const timer = this.activeTimers.get(taskId);
+        if (timer) {
+            timer.pause();
+        }
+        this.updateDisplay();
+    }
+
+    resumeTask(taskId) {
+        const timer = this.activeTimers.get(taskId);
+        if (timer) {
+            timer.resume();
+        }
+        this.updateDisplay();
+    }
+
+    stopTaskTimer(taskId) {
+        const timer = this.activeTimers.get(taskId);
+        if (timer) {
+            const timeSpent = timer.getElapsedTime();
+            timer.stop();
+            this.activeTimers.delete(taskId);
+            
+            const task = this.tasks.find(t => t.id === taskId);
+            if (task) {
+                task.timeSpent += timeSpent;
+                task.status = 'pending';
+                this.saveTasks();
+            }
+        }
+        this.updateDisplay();
+    }
+
+    completeTask(taskId) {
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        this.stopTaskTimer(taskId);
+        
+        task.status = 'completed';
+        task.completedAt = new Date().toISOString();
+        
+        const points = this.gamificationSystem.calculateTaskPoints(task);
+        this.gamificationSystem.addPoints(points);
+        this.gamificationSystem.checkAchievements(this.tasks);
+        
+        this.saveTasks();
+        this.updateDisplay();
+    }
+
+    updateTaskTimer(taskId) {
+        const task = this.tasks.find(t => t.id === taskId);
+        const timer = this.activeTimers.get(taskId);
+        
+        if (task && timer) {
+            const elapsed = timer.getElapsedTime();
+            const estimatedMs = task.estimatedTime * 60 * 1000;
+            
+            if (elapsed > estimatedMs && !task.isOverdue) {
+                task.isOverdue = true;
+                this.gamificationSystem.deductPointsForDelay(task);
+                this.saveTasks();
+            }
+        }
+        
+        this.updateTaskList();
+    }
+
+    updateDisplay() {
+        this.updateStats();
+        this.updateTaskList();
+        this.updateAchievements();
+    }
+
+    updateStats() {
+        const stats = this.gamificationSystem.getStats();
+        const todayTasks = this.getTodayCompletedTasks().length;
+        
+        document.getElementById('total-points').textContent = stats.totalPoints;
+        document.getElementById('daily-streak').textContent = stats.dailyStreak;
+        document.getElementById('tasks-today').textContent = todayTasks;
+    }
+
+    updateTaskList() {
+        const statusFilter = document.getElementById('status-filter').value;
+        const priorityFilter = document.getElementById('priority-filter').value;
+        
+        let filteredTasks = this.tasks;
+        
+        if (statusFilter !== 'all') {
+            filteredTasks = filteredTasks.filter(task => task.status === statusFilter);
+        }
+        
+        if (priorityFilter !== 'all') {
+            filteredTasks = filteredTasks.filter(task => task.priority === priorityFilter);
+        }
+
+        const taskList = document.getElementById('task-list');
+        
+        if (filteredTasks.length === 0) {
+            taskList.innerHTML = `
+                <div class="empty-state">
+                    <h3>No tasks found</h3>
+                    <p>Add a new task to get started!</p>
+                </div>
+            `;
+            return;
+        }
+
+        taskList.innerHTML = filteredTasks.map(task => this.renderTask(task)).join('');
+        
+        filteredTasks.forEach(task => {
+            this.attachTaskEventListeners(task.id);
+        });
+    }
+
+    renderTask(task) {
+        const timer = this.activeTimers.get(task.id);
+        const isRunning = timer && timer.isRunning;
+        const isPaused = timer && timer.isPaused;
+        const currentTime = timer ? timer.getElapsedTime() : task.timeSpent;
+        const estimatedMs = task.estimatedTime * 60 * 1000;
+        
+        const statusClass = task.isOverdue ? 'overdue' : task.status;
+        const timerDisplay = this.formatTime(currentTime);
+        const estimatedDisplay = this.formatTime(estimatedMs);
+
+        return `
+            <div class="task-item ${statusClass}" data-task-id="${task.id}">
+                <div class="task-header-row">
+                    <h3 class="task-title">${task.title}</h3>
+                    <span class="task-priority ${task.priority}">${task.priority}</span>
+                </div>
+                
+                ${task.description ? `<p class="task-description">${task.description}</p>` : ''}
+                
+                <div class="task-meta">
+                    <span>Estimated: ${estimatedDisplay}</span>
+                    <span>Status: ${task.status.replace('-', ' ')}</span>
+                </div>
+                
+                <div class="task-timer">
+                    <div class="timer-display">${timerDisplay}</div>
+                    <div class="timer-controls">
+                        ${task.status !== 'completed' ? `
+                            ${!isRunning ? `
+                                <button class="btn primary start-task-btn">Start</button>
+                            ` : `
+                                ${!isPaused ? `
+                                    <button class="btn secondary pause-task-btn">Pause</button>
+                                ` : `
+                                    <button class="btn primary resume-task-btn">Resume</button>
+                                `}
+                                <button class="btn secondary stop-task-btn">Stop</button>
+                            `}
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <div class="task-actions">
+                    ${task.status !== 'completed' ? `
+                        <button class="btn primary complete-task-btn">Complete</button>
+                        <button class="btn secondary edit-task-btn">Edit</button>
+                    ` : ''}
+                    <button class="btn secondary delete-task-btn">Delete</button>
+                </div>
+            </div>
+        `;
+    }
+
+    attachTaskEventListeners(taskId) {
+        const taskElement = document.querySelector(`[data-task-id="${taskId}"]`);
+        if (!taskElement) return;
+
+        const startBtn = taskElement.querySelector('.start-task-btn');
+        const pauseBtn = taskElement.querySelector('.pause-task-btn');
+        const resumeBtn = taskElement.querySelector('.resume-task-btn');
+        const stopBtn = taskElement.querySelector('.stop-task-btn');
+        const completeBtn = taskElement.querySelector('.complete-task-btn');
+        const editBtn = taskElement.querySelector('.edit-task-btn');
+        const deleteBtn = taskElement.querySelector('.delete-task-btn');
+
+        if (startBtn) startBtn.addEventListener('click', () => this.startTask(taskId));
+        if (pauseBtn) pauseBtn.addEventListener('click', () => this.pauseTask(taskId));
+        if (resumeBtn) resumeBtn.addEventListener('click', () => this.resumeTask(taskId));
+        if (stopBtn) stopBtn.addEventListener('click', () => this.stopTaskTimer(taskId));
+        if (completeBtn) completeBtn.addEventListener('click', () => this.completeTask(taskId));
+        if (editBtn) editBtn.addEventListener('click', () => this.showEditTaskModal(taskId));
+        if (deleteBtn) deleteBtn.addEventListener('click', () => this.deleteTask(taskId));
+    }
+
+    updateAchievements() {
+        const achievements = this.gamificationSystem.getAchievements();
+        const achievementsList = document.getElementById('achievements-list');
+        
+        achievementsList.innerHTML = achievements.map(achievement => `
+            <div class="achievement-item ${achievement.unlocked ? 'unlocked' : ''}">
+                <div class="achievement-icon">${achievement.icon}</div>
+                <div class="achievement-title">${achievement.title}</div>
+                <div class="achievement-description">${achievement.description}</div>
+            </div>
+        `).join('');
+    }
+
+    getTodayCompletedTasks() {
+        const today = new Date().toDateString();
+        return this.tasks.filter(task => 
+            task.status === 'completed' && 
+            task.completedAt && 
+            new Date(task.completedAt).toDateString() === today
+        );
+    }
+
+    formatTime(milliseconds) {
+        const totalSeconds = Math.floor(milliseconds / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    loadTasks() {
+        const saved = localStorage.getItem('task-tracker-tasks');
+        return saved ? JSON.parse(saved) : [];
+    }
+
+    saveTasks() {
+        localStorage.setItem('task-tracker-tasks', JSON.stringify(this.tasks));
+    }
+}
+
+class TaskTimer {
+    constructor(taskId, updateCallback) {
+        this.taskId = taskId;
+        this.updateCallback = updateCallback;
+        this.startTime = null;
+        this.elapsedTime = 0;
+        this.isRunning = false;
+        this.isPaused = false;
+        this.intervalId = null;
+    }
+
+    start() {
+        if (this.isRunning) return;
+        
+        this.startTime = Date.now() - this.elapsedTime;
+        this.isRunning = true;
+        this.isPaused = false;
+        
+        this.intervalId = setInterval(() => {
+            if (this.updateCallback) {
+                this.updateCallback();
+            }
+        }, 1000);
+    }
+
+    pause() {
+        if (!this.isRunning || this.isPaused) return;
+        
+        this.elapsedTime = Date.now() - this.startTime;
+        this.isPaused = true;
+        
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+    }
+
+    resume() {
+        if (!this.isRunning || !this.isPaused) return;
+        
+        this.startTime = Date.now() - this.elapsedTime;
+        this.isPaused = false;
+        
+        this.intervalId = setInterval(() => {
+            if (this.updateCallback) {
+                this.updateCallback();
+            }
+        }, 1000);
+    }
+
+    stop() {
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+        
+        if (this.isRunning && !this.isPaused) {
+            this.elapsedTime = Date.now() - this.startTime;
+        }
+        
+        this.isRunning = false;
+        this.isPaused = false;
+    }
+
+    getElapsedTime() {
+        if (!this.isRunning) {
+            return this.elapsedTime;
+        }
+        
+        if (this.isPaused) {
+            return this.elapsedTime;
+        }
+        
+        return Date.now() - this.startTime;
+    }
+}
+
+class GamificationSystem {
+    constructor() {
+        this.data = this.loadData();
+        this.achievements = this.initializeAchievements();
+    }
+
+    initializeAchievements() {
+        return [
+            {
+                id: 'first_task',
+                title: 'Getting Started',
+                description: 'Complete your first task',
+                icon: '🎯',
+                unlocked: false,
+                condition: (tasks) => tasks.filter(t => t.status === 'completed').length >= 1
+            },
+            {
+                id: 'daily_three',
+                title: 'Daily Achiever',
+                description: 'Complete 3 tasks in one day',
+                icon: '⭐',
+                unlocked: false,
+                condition: (tasks) => this.getTodayCompletedTasks(tasks).length >= 3
+            },
+            {
+                id: 'speed_demon',
+                title: 'Speed Demon',
+                description: 'Complete a task under estimated time',
+                icon: '⚡',
+                unlocked: false,
+                condition: (tasks) => tasks.some(t => 
+                    t.status === 'completed' && 
+                    t.timeSpent < (t.estimatedTime * 60 * 1000)
+                )
+            },
+            {
+                id: 'streak_week',
+                title: 'Week Warrior',
+                description: 'Complete tasks for 7 days straight',
+                icon: '🔥',
+                unlocked: false,
+                condition: () => this.data.dailyStreak >= 7
+            },
+            {
+                id: 'hundred_points',
+                title: 'Century Club',
+                description: 'Earn 100 total points',
+                icon: '💯',
+                unlocked: false,
+                condition: () => this.data.totalPoints >= 100
+            }
+        ];
+    }
+
+    calculateTaskPoints(task) {
+        let basePoints = 10;
+        
+        switch (task.priority) {
+            case 'high': basePoints = 20; break;
+            case 'medium': basePoints = 15; break;
+            case 'low': basePoints = 10; break;
+        }
+
+        const estimatedMs = task.estimatedTime * 60 * 1000;
+        if (task.timeSpent < estimatedMs) {
+            basePoints += 5;
+        }
+
+        return basePoints;
+    }
+
+    addPoints(points) {
+        this.data.totalPoints += points;
+        this.updateDailyStreak();
+        this.saveData();
+    }
+
+    deductPointsForDelay(task) {
+        const penalty = Math.floor(this.calculateTaskPoints(task) * 0.5);
+        this.data.totalPoints = Math.max(0, this.data.totalPoints - penalty);
+        this.saveData();
+    }
+
+    updateDailyStreak() {
+        const today = new Date().toDateString();
+        const lastActive = this.data.lastActiveDate;
+        
+        if (lastActive !== today) {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            
+            if (lastActive === yesterday.toDateString()) {
+                this.data.dailyStreak += 1;
+            } else {
+                this.data.dailyStreak = 1;
+            }
+            
+            this.data.lastActiveDate = today;
+        }
+    }
+
+    checkAchievements(tasks) {
+        this.achievements.forEach(achievement => {
+            if (!achievement.unlocked && achievement.condition(tasks)) {
+                achievement.unlocked = true;
+                this.data.unlockedAchievements.push(achievement.id);
+                this.addPoints(25);
+            }
+        });
+        
+        this.saveData();
+    }
+
+    getTodayCompletedTasks(tasks) {
+        const today = new Date().toDateString();
+        return tasks.filter(task => 
+            task.status === 'completed' && 
+            task.completedAt && 
+            new Date(task.completedAt).toDateString() === today
+        );
+    }
+
+    getStats() {
+        return {
+            totalPoints: this.data.totalPoints,
+            dailyStreak: this.data.dailyStreak
+        };
+    }
+
+    getAchievements() {
+        return this.achievements.map(achievement => ({
+            ...achievement,
+            unlocked: this.data.unlockedAchievements.includes(achievement.id)
+        }));
+    }
+
+    loadData() {
+        const saved = localStorage.getItem('task-tracker-gamification');
+        return saved ? JSON.parse(saved) : {
+            totalPoints: 0,
+            dailyStreak: 0,
+            lastActiveDate: null,
+            unlockedAchievements: []
+        };
+    }
+
+    saveData() {
+        localStorage.setItem('task-tracker-gamification', JSON.stringify(this.data));
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     new RubiksCubeGame();
+    new TaskTracker();
 });

@@ -1,0 +1,27 @@
+{
+  "name": "rubiks-cube-game-with-task-tracker",
+  "version": "1.0.0",
+  "description": "Rubik's Cube Game with integrated Task Tracker and Gamification features",
+  "main": "index.html",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "keywords": ["rubiks-cube", "game", "task-tracker", "gamification", "productivity"],
+  "author": "Devin AI",
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": ["**/tests/**/*.test.js"],
+    "collectCoverageFrom": [
+      "game.js",
+      "!node_modules/**"
+    ],
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"]
+  }
+}
