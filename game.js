@@ -618,19 +618,36 @@ class TaskTracker {
         this.currentEditingTask = null;
         this.activeTimers = new Map();
         
-        this.initializeEventListeners();
-        this.updateDisplay();
+        if (typeof document !== 'undefined' && document.getElementById) {
+            this.initializeEventListeners();
+            this.updateDisplay();
+        }
     }
 
     initializeEventListeners() {
-        document.getElementById('show-task-tracker-btn').addEventListener('click', () => this.showTaskTracker());
-        document.getElementById('back-to-menu-from-tasks-btn').addEventListener('click', () => this.backToMenu());
-        document.getElementById('add-task-btn').addEventListener('click', () => this.showAddTaskModal());
-        document.getElementById('close-modal-btn').addEventListener('click', () => this.hideModal());
-        document.getElementById('cancel-task-btn').addEventListener('click', () => this.hideModal());
-        document.getElementById('task-form').addEventListener('submit', (e) => this.handleTaskSubmit(e));
-        document.getElementById('status-filter').addEventListener('change', () => this.updateTaskList());
-        document.getElementById('priority-filter').addEventListener('change', () => this.updateTaskList());
+        const showTaskTrackerBtn = document.getElementById('show-task-tracker-btn');
+        if (showTaskTrackerBtn) showTaskTrackerBtn.addEventListener('click', () => this.showTaskTracker());
+        
+        const backToMenuBtn = document.getElementById('back-to-menu-from-tasks-btn');
+        if (backToMenuBtn) backToMenuBtn.addEventListener('click', () => this.backToMenu());
+        
+        const addTaskBtn = document.getElementById('add-task-btn');
+        if (addTaskBtn) addTaskBtn.addEventListener('click', () => this.showAddTaskModal());
+        
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        if (closeModalBtn) closeModalBtn.addEventListener('click', () => this.hideModal());
+        
+        const cancelTaskBtn = document.getElementById('cancel-task-btn');
+        if (cancelTaskBtn) cancelTaskBtn.addEventListener('click', () => this.hideModal());
+        
+        const taskForm = document.getElementById('task-form');
+        if (taskForm) taskForm.addEventListener('submit', (e) => this.handleTaskSubmit(e));
+        
+        const statusFilter = document.getElementById('status-filter');
+        if (statusFilter) statusFilter.addEventListener('change', () => this.updateTaskList());
+        
+        const priorityFilter = document.getElementById('priority-filter');
+        if (priorityFilter) priorityFilter.addEventListener('change', () => this.updateTaskList());
 
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal')) {
@@ -814,27 +831,51 @@ class TaskTracker {
             }
         }
         
+        if (task && task.status === 'in-progress') {
+            const currentTimeSpent = timer ? timer.getElapsedTime() : task.timeSpent;
+            const estimatedMs = task.estimatedTime * 60 * 1000;
+            
+            if (currentTimeSpent > estimatedMs && !task.isOverdue) {
+                task.isOverdue = true;
+                this.gamificationSystem.deductPointsForDelay(task);
+                this.saveTasks();
+            }
+        }
+        
         this.updateTaskList();
     }
 
     updateDisplay() {
-        this.updateStats();
-        this.updateTaskList();
-        this.updateAchievements();
+        if (typeof document !== 'undefined' && document.getElementById) {
+            this.updateStats();
+            this.updateTaskList();
+            this.updateAchievements();
+        }
     }
 
     updateStats() {
         const stats = this.gamificationSystem.getStats();
         const todayTasks = this.getTodayCompletedTasks().length;
         
-        document.getElementById('total-points').textContent = stats.totalPoints;
-        document.getElementById('daily-streak').textContent = stats.dailyStreak;
-        document.getElementById('tasks-today').textContent = todayTasks;
+        const totalPointsEl = document.getElementById('total-points');
+        if (totalPointsEl) totalPointsEl.textContent = stats.totalPoints;
+        
+        const dailyStreakEl = document.getElementById('daily-streak');
+        if (dailyStreakEl) dailyStreakEl.textContent = stats.dailyStreak;
+        
+        const tasksTodayEl = document.getElementById('tasks-today');
+        if (tasksTodayEl) tasksTodayEl.textContent = todayTasks;
     }
 
     updateTaskList() {
-        const statusFilter = document.getElementById('status-filter').value;
-        const priorityFilter = document.getElementById('priority-filter').value;
+        const statusFilterEl = document.getElementById('status-filter');
+        const priorityFilterEl = document.getElementById('priority-filter');
+        const taskListEl = document.getElementById('task-list');
+        
+        if (!statusFilterEl || !priorityFilterEl || !taskListEl) return;
+        
+        const statusFilter = statusFilterEl.value;
+        const priorityFilter = priorityFilterEl.value;
         
         let filteredTasks = this.tasks;
         
@@ -846,10 +887,8 @@ class TaskTracker {
             filteredTasks = filteredTasks.filter(task => task.priority === priorityFilter);
         }
 
-        const taskList = document.getElementById('task-list');
-        
         if (filteredTasks.length === 0) {
-            taskList.innerHTML = `
+            taskListEl.innerHTML = `
                 <div class="empty-state">
                     <h3>No tasks found</h3>
                     <p>Add a new task to get started!</p>
@@ -858,7 +897,7 @@ class TaskTracker {
             return;
         }
 
-        taskList.innerHTML = filteredTasks.map(task => this.renderTask(task)).join('');
+        taskListEl.innerHTML = filteredTasks.map(task => this.renderTask(task)).join('');
         
         filteredTasks.forEach(task => {
             this.attachTaskEventListeners(task.id);
@@ -944,6 +983,8 @@ class TaskTracker {
         const achievements = this.gamificationSystem.getAchievements();
         const achievementsList = document.getElementById('achievements-list');
         
+        if (!achievementsList) return;
+        
         achievementsList.innerHTML = achievements.map(achievement => `
             <div class="achievement-item ${achievement.unlocked ? 'unlocked' : ''}">
                 <div class="achievement-icon">${achievement.icon}</div>
@@ -970,8 +1011,14 @@ class TaskTracker {
     }
 
     loadTasks() {
-        const saved = localStorage.getItem('task-tracker-tasks');
-        return saved ? JSON.parse(saved) : [];
+        try {
+            const saved = localStorage.getItem('task-tracker-tasks');
+            return saved ? JSON.parse(saved) : [];
+        } catch (error) {
+            console.warn('Failed to load tasks from localStorage:', error);
+            localStorage.removeItem('task-tracker-tasks');
+            return [];
+        }
     }
 
     saveTasks() {
@@ -1193,13 +1240,24 @@ class GamificationSystem {
     }
 
     loadData() {
-        const saved = localStorage.getItem('task-tracker-gamification');
-        return saved ? JSON.parse(saved) : {
-            totalPoints: 0,
-            dailyStreak: 0,
-            lastActiveDate: null,
-            unlockedAchievements: []
-        };
+        try {
+            const saved = localStorage.getItem('task-tracker-gamification');
+            return saved ? JSON.parse(saved) : {
+                totalPoints: 0,
+                dailyStreak: 0,
+                lastActiveDate: null,
+                unlockedAchievements: []
+            };
+        } catch (error) {
+            console.warn('Failed to load gamification data from localStorage:', error);
+            localStorage.removeItem('task-tracker-gamification');
+            return {
+                totalPoints: 0,
+                dailyStreak: 0,
+                lastActiveDate: null,
+                unlockedAchievements: []
+            };
+        }
     }
 
     saveData() {

@@ -10,8 +10,18 @@ describe('TaskTracker', () => {
                 <div id="tasks-today">0</div>
                 <div id="task-list"></div>
                 <div id="achievements-list"></div>
-                <select id="status-filter"><option value="all">All</option></select>
-                <select id="priority-filter"><option value="all">All</option></select>
+                <select id="status-filter">
+                    <option value="all">All</option>
+                    <option value="pending">Pending</option>
+                    <option value="in-progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                </select>
+                <select id="priority-filter">
+                    <option value="all">All</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
             </div>
             <div id="task-modal" class="modal">
                 <form id="task-form">
